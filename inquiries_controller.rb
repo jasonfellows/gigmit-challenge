@@ -35,7 +35,6 @@ class Gigs::InquiriesController < Gigs::ApplicationController
     @inquiry.artist     = current_profile
     @inquiry.user       = current_profile.main_user
     @inquiry.promoter   = gig.promoter
-    existing_gig_invite = current_profile.gig_invites.where(gig_id: params[:gig_id]).first
 
     #if inquiry is valid, which means we will definitivly after this, copy
     #the riders from the current profile to the inquiry
@@ -69,9 +68,11 @@ class Gigs::InquiriesController < Gigs::ApplicationController
       Gigmit::Intercom::Event::Simple.emit('gig-received-application', gig.promoter_id)
       IntercomCreateOrUpdateUserWorker.perform_async(gig.promoter_id)
 
+      existing_gig_invite = current_profile.gig_invites.find_by(gig_id: params[:gig_id])
       if existing_gig_invite.present?
         Event::Read.emit(:gig_invite, existing_gig_invite.id)
       end
+
       render json: @inquiry, status: :created
     else
       render json: @inquiry.errors, status: :unprocessable_entity
