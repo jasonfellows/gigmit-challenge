@@ -6,20 +6,18 @@ class Gigs::InquiriesController < Gigs::ApplicationController
   respond_to :html, only: [:new, :show]
   respond_to :json, only: [:create]
 
-  before_filter :load_gig,       only: [:create, :new]
-
   def new
-    @inquiry.gig                   = @gig
-    @inquiry.deal_possible_fee_min = @gig.deal_possible_fee_min
+    @inquiry.gig                   = gig
+    @inquiry.deal_possible_fee_min = gig.deal_possible_fee_min
     @inquiry.artist_contact        = current_profile.last_inquired(:artist_contact)
     @inquiry.travel_party_count    = current_profile.last_inquired(:travel_party_count)
-    @inquiry.custom_fields         = @gig.custom_fields
+    @inquiry.custom_fields         = gig.custom_fields
 
-    if @gig.fixed_fee_option && @gig.fixed_fee_max == 0
+    if gig.fixed_fee_option && gig.fixed_fee_max == 0
       @inquiry.fixed_fee = 0
     end
 
-    if @gig.fixed_fee_negotiable
+    if gig.fixed_fee_negotiable
       @inquiry.gig.fixed_fee_option = true
       @inquiry.gig.fixed_fee_max    = 0
     end
@@ -33,7 +31,7 @@ class Gigs::InquiriesController < Gigs::ApplicationController
 
     # Gigmit::Matcher#matches? returns a boolean whether an aritst matches a
     # given gig
-    @is_matching = Gigmit::Matcher.new(@gig, current_profile).matches?
+    @is_matching = Gigmit::Matcher.new(gig, current_profile).matches?
 
     if current_profile.billing_address.blank? || current_profile.tax_rate.blank?
       @profile = current_profile
@@ -46,17 +44,17 @@ class Gigs::InquiriesController < Gigs::ApplicationController
       end
     end
 
-    Gigmit::Intercom::Event::ApplicationSawIncompleteBillingDataWarning.emit(@gig.id, current_profile.id) unless current_profile.has_a_complete_billing_address?
-    Gigmit::Intercom::Event::ApplicationSawIncompleteEpkWarning.emit(@gig.id, current_profile.id) unless current_profile.epk_complete?
+    Gigmit::Intercom::Event::ApplicationSawIncompleteBillingDataWarning.emit(gig.id, current_profile.id) unless current_profile.has_a_complete_billing_address?
+    Gigmit::Intercom::Event::ApplicationSawIncompleteEpkWarning.emit(gig.id, current_profile.id) unless current_profile.epk_complete?
 
-    Gigmit::Intercom::Event::ApplicationVisitedGigApplicationForm.emit(@gig.id, current_profile.id) if current_profile.complete_for_inquiry?
+    Gigmit::Intercom::Event::ApplicationVisitedGigApplicationForm.emit(gig.id, current_profile.id) if current_profile.complete_for_inquiry?
   end
 
   def create
-    @inquiry.gig        = @gig
+    @inquiry.gig        = gig
     @inquiry.artist     = current_profile
     @inquiry.user       = current_profile.main_user
-    @inquiry.promoter   = @gig.promoter
+    @inquiry.promoter   = gig.promoter
     existing_gig_invite = current_profile.gig_invites.where(gig_id: params[:gig_id]).first
 
     #if inquiry is valid, which means we will definitivly after this, copy
@@ -88,8 +86,8 @@ class Gigs::InquiriesController < Gigs::ApplicationController
 
       Event::WatchlistArtistInquiry.emit(@inquiry.id)
 
-      Gigmit::Intercom::Event::Simple.emit('gig-received-application', @gig.promoter_id)
-      IntercomCreateOrUpdateUserWorker.perform_async(@gig.promoter_id)
+      Gigmit::Intercom::Event::Simple.emit('gig-received-application', gig.promoter_id)
+      IntercomCreateOrUpdateUserWorker.perform_async(gig.promoter_id)
 
       if existing_gig_invite.present?
         Event::Read.emit(:gig_invite, existing_gig_invite.id)
@@ -111,9 +109,10 @@ class Gigs::InquiriesController < Gigs::ApplicationController
 
   private
 
-  def load_gig
-    @gig = Gig.find_by! slug: params[:gig_id]
+  def gig
+    @gig ||= Gig.find_by! slug: params[:gig_id]
   end
+  helper_method :gig
 
   def paywall_chroot
     if current_profile.artist? && flash[:bypass_trial_chroot] != true
