@@ -36,9 +36,7 @@ class Gigs::InquiriesController < Gigs::ApplicationController
     @inquiry.user       = current_profile.main_user
     @inquiry.promoter   = gig.promoter
 
-    #if inquiry is valid, which means we will definitivly after this, copy
-    #the riders from the current profile to the inquiry
-    if @inquiry.valid?
+    if @inquiry.save
       if current_profile.technical_rider.present? && current_profile.technical_rider.item_hash == params[:inquiry][:technical_rider_hash]
         @inquiry.build_technical_rider(user_id: current_user.id).save!
         MediaItemWorker.perform_async(current_profile.technical_rider.id, @inquiry.technical_rider.id)
@@ -48,9 +46,7 @@ class Gigs::InquiriesController < Gigs::ApplicationController
         @inquiry.build_catering_rider(user_id: current_user.id).save!
         MediaItemWorker.perform_async(current_profile.catering_rider.id, @inquiry.catering_rider.id)
       end
-    end
 
-    if @inquiry.save
       #if profile has no rides yet, which means, this is the profiles first inquiry ever
       #copy the riders from the inquiry to the profile
       if current_profile.technical_rider.blank? && @inquiry.technical_rider.present?
