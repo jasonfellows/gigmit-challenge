@@ -29,4 +29,13 @@ class Inquiry < ActiveRecord::Base
     self.technical_rider = initial_profile.technical_rider
     self.catering_rider  = initial_profile.catering_rider
   end
+
+  def save_with_gig_and_profile(initial_gig, initial_profile)
+    self.gig        = initial_gig
+    self.artist     = initial_profile
+    self.user       = initial_profile.main_user
+    self.promoter   = initial_gig.promoter
+
+    self.save
+  end
 end

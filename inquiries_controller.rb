@@ -31,12 +31,7 @@ class Gigs::InquiriesController < Gigs::ApplicationController
   end
 
   def create
-    @inquiry.gig        = gig
-    @inquiry.artist     = current_profile
-    @inquiry.user       = current_profile.main_user
-    @inquiry.promoter   = gig.promoter
-
-    if @inquiry.save
+    if @inquiry.save_with_gig_and_profile(gig, current_profile)
       if current_profile.technical_rider.present? && current_profile.technical_rider.item_hash == params[:inquiry][:technical_rider_hash]
         @inquiry.build_technical_rider(user_id: current_user.id).save!
         MediaItemWorker.perform_async(current_profile.technical_rider.id, @inquiry.technical_rider.id)
