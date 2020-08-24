@@ -9,24 +9,20 @@ class Gigs::InquiriesController < Gigs::ApplicationController
   def new
     @inquiry.build_from_gig_and_profile(gig, current_profile)
 
-    # Gigmit::Matcher#matches? returns a boolean whether an aritst matches a
-    # given gig
+    # Gigmit::Matcher#matches? returns a boolean whether an aritst matches a given gig
     @is_matching = Gigmit::Matcher.new(gig, current_profile).matches?
 
+    @profile = nil
     if current_profile.billing_address.blank? || current_profile.tax_rate.blank?
       @profile = current_profile
+
       if @profile.billing_address.blank?
-        @profile.build_billing_address
-        @profile.billing_address.name = [
-          @profile.main_user.first_name,
-          @profile.main_user.last_name
-        ].join(' ')
+        @profile.build_billing_address(name: "#{@profile.main_user.first_name} #{@profile.main_user.last_name}")
       end
     end
 
     Gigmit::Intercom::Event::ApplicationSawIncompleteBillingDataWarning.emit(gig.id, current_profile.id) unless current_profile.has_a_complete_billing_address?
     Gigmit::Intercom::Event::ApplicationSawIncompleteEpkWarning.emit(gig.id, current_profile.id) unless current_profile.epk_complete?
-
     Gigmit::Intercom::Event::ApplicationVisitedGigApplicationForm.emit(gig.id, current_profile.id) if current_profile.complete_for_inquiry?
   end
 
@@ -42,8 +38,8 @@ class Gigs::InquiriesController < Gigs::ApplicationController
         MediaItemWorker.perform_async(current_profile.catering_rider.id, @inquiry.catering_rider.id)
       end
 
-      #if profile has no rides yet, which means, this is the profiles first inquiry ever
-      #copy the riders from the inquiry to the profile
+      # if profile has no riders yet, which means this is the profile's first inquiry ever
+      # copy the riders from the inquiry to the profile
       if current_profile.technical_rider.blank? && @inquiry.technical_rider.present?
         current_profile.build_technical_rider(user_id: current_user.id).save!
         MediaItemWorker.perform_async(@inquiry.technical_rider.id, current_profile.technical_rider.id)
@@ -55,7 +51,6 @@ class Gigs::InquiriesController < Gigs::ApplicationController
       end
 
       Event::WatchlistArtistInquiry.emit(@inquiry.id)
-
       Gigmit::Intercom::Event::Simple.emit('gig-received-application', gig.promoter_id)
       IntercomCreateOrUpdateUserWorker.perform_async(gig.promoter_id)
 
@@ -70,10 +65,10 @@ class Gigs::InquiriesController < Gigs::ApplicationController
     end
   end
 
-  #only promoter use this
+  # only promoters use this
   def show
-    #this redirect is for unfixed legacy links, because artist see inquiries
-    #not prefixed with gig in the url
+    # this redirect is for unfixed legacy links, because artist see inquiries
+    # not prefixed with gig in the url
     redirect_to inquiry_path(@inquiry.id) and return if current_profile.artist?
 
     Event::Read.emit(:inquiry, @inquiry.id)
