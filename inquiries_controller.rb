@@ -112,7 +112,7 @@ class Gigs::InquiriesController < Gigs::ApplicationController
   private
 
   def load_gig
-    @gig = Gig.where(slug: params[:gig_id]).first
+    @gig = Gig.find_by! slug: params[:gig_id]
   end
 
   def paywall_chroot
