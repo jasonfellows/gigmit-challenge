@@ -7,27 +7,7 @@ class Gigs::InquiriesController < Gigs::ApplicationController
   respond_to :json, only: [:create]
 
   def new
-    @inquiry.gig                   = gig
-    @inquiry.deal_possible_fee_min = gig.deal_possible_fee_min
-    @inquiry.artist_contact        = current_profile.last_inquired(:artist_contact)
-    @inquiry.travel_party_count    = current_profile.last_inquired(:travel_party_count)
-    @inquiry.custom_fields         = gig.custom_fields
-
-    if gig.fixed_fee_option && gig.fixed_fee_max == 0
-      @inquiry.fixed_fee = 0
-    end
-
-    if gig.fixed_fee_negotiable
-      @inquiry.gig.fixed_fee_option = true
-      @inquiry.gig.fixed_fee_max    = 0
-    end
-
-    # set this rider here for new
-    # if user keeps it until create, they will be copied async
-    # otherwise he can pseudo delete the riders in the Inquiry#new form and
-    # add new ones
-    @inquiry.technical_rider = current_profile.technical_rider
-    @inquiry.catering_rider  = current_profile.catering_rider
+    @inquiry.build_from_gig_and_profile(gig, current_profile)
 
     # Gigmit::Matcher#matches? returns a boolean whether an aritst matches a
     # given gig
