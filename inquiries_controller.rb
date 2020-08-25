@@ -28,24 +28,24 @@ class Gigs::InquiriesController < Gigs::ApplicationController
 
   def create
     if @inquiry.save_with_gig_and_profile(gig, current_profile)
-      if current_profile.technical_rider.present? && current_profile.technical_rider.item_hash == params[:inquiry][:technical_rider_hash]
-        @inquiry.build_technical_rider(user_id: current_user.id).save!
-        MediaItemWorker.perform_async(current_profile.technical_rider.id, @inquiry.technical_rider.id)
-      end
-
-      if current_profile.catering_rider.present? && current_profile.catering_rider.item_hash == params[:inquiry][:catering_rider_hash]
-        @inquiry.build_catering_rider(user_id: current_user.id).save!
-        MediaItemWorker.perform_async(current_profile.catering_rider.id, @inquiry.catering_rider.id)
-      end
-
-      # if profile has no riders yet, which means this is the profile's first inquiry ever
-      # copy the riders from the inquiry to the profile
-      if current_profile.technical_rider.blank? && @inquiry.technical_rider.present?
+      if current_profile.technical_rider.present?
+        if current_profile.technical_rider.item_hash == params[:inquiry][:technical_rider_hash]
+          @inquiry.build_technical_rider(user_id: current_user.id).save!
+          MediaItemWorker.perform_async(current_profile.technical_rider.id, @inquiry.technical_rider.id)
+        end
+      elsif @inquiry.technical_rider.present?
+        # if profile has no riders yet, which means this is the profile's first inquiry ever
+        # copy the riders from the inquiry to the profile
         current_profile.build_technical_rider(user_id: current_user.id).save!
         MediaItemWorker.perform_async(@inquiry.technical_rider.id, current_profile.technical_rider.id)
       end
 
-      if current_profile.catering_rider.blank? && @inquiry.catering_rider.present?
+      if current_profile.catering_rider.present?
+        if current_profile.catering_rider.item_hash == params[:inquiry][:catering_rider_hash]
+          @inquiry.build_catering_rider(user_id: current_user.id).save!
+          MediaItemWorker.perform_async(current_profile.catering_rider.id, @inquiry.catering_rider.id)
+        end
+      elsif @inquiry.catering_rider.present?
         current_profile.build_catering_rider(user_id: current_user.id).save!
         MediaItemWorker.perform_async(@inquiry.catering_rider.id, current_profile.catering_rider.id)
       end
