@@ -6,104 +6,49 @@ class Gigs::InquiriesController < Gigs::ApplicationController
   respond_to :html, only: [:new, :show]
   respond_to :json, only: [:create]
 
-  before_filter :load_gig,       only: [:create, :new]
-
   def new
-    @inquiry.gig                   = @gig
-    @inquiry.deal_possible_fee_min = @gig.deal_possible_fee_min
-    @inquiry.artist_contact        = current_profile.last_inquired(:artist_contact)
-    @inquiry.travel_party_count    = current_profile.last_inquired(:travel_party_count)
-    @inquiry.custom_fields         = @gig.custom_fields
+    @inquiry.build_from_gig_and_profile(gig, current_profile)
 
-    if @gig.fixed_fee_option && @gig.fixed_fee_max == 0
-      @inquiry.fixed_fee = 0
-    end
+    # Gigmit::Matcher#matches? returns a boolean whether an aritst matches a given gig
+    @is_matching = Gigmit::Matcher.new(gig, current_profile).matches?
 
-    if @gig.fixed_fee_negotiable
-      @inquiry.gig.fixed_fee_option = true
-      @inquiry.gig.fixed_fee_max    = 0
-    end
-
-    # set this rider here for new
-    # if user keeps it until create, they will be copied async
-    # otherwise he can pseudo delete the riders in the Inquiry#new form and
-    # add new ones
-    @inquiry.technical_rider = current_profile.technical_rider
-    @inquiry.catering_rider  = current_profile.catering_rider
-
-    # Gigmit::Matcher#matches? returns a boolean whether an aritst matches a
-    # given gig
-    @is_matching = Gigmit::Matcher.new(@gig, current_profile).matches?
-
+    @profile = nil
     if current_profile.billing_address.blank? || current_profile.tax_rate.blank?
       @profile = current_profile
+
       if @profile.billing_address.blank?
-        @profile.build_billing_address
-        @profile.billing_address.name = [
-          @profile.main_user.first_name,
-          @profile.main_user.last_name
-        ].join(' ')
+        @profile.build_billing_address(name: "#{@profile.main_user.first_name} #{@profile.main_user.last_name}")
       end
     end
 
-    Gigmit::Intercom::Event::ApplicationSawIncompleteBillingDataWarning.emit(@gig.id, current_profile.id) unless current_profile.has_a_complete_billing_address?
-    Gigmit::Intercom::Event::ApplicationSawIncompleteEpkWarning.emit(@gig.id, current_profile.id) unless current_profile.epk_complete?
-
-    Gigmit::Intercom::Event::ApplicationVisitedGigApplicationForm.emit(@gig.id, current_profile.id) if current_profile.complete_for_inquiry?
+    Gigmit::Intercom::Event::ApplicationSawIncompleteBillingDataWarning.emit(gig.id, current_profile.id) unless current_profile.has_a_complete_billing_address?
+    Gigmit::Intercom::Event::ApplicationSawIncompleteEpkWarning.emit(gig.id, current_profile.id) unless current_profile.epk_complete?
+    Gigmit::Intercom::Event::ApplicationVisitedGigApplicationForm.emit(gig.id, current_profile.id) if current_profile.complete_for_inquiry?
   end
 
   def create
-    @inquiry.gig        = @gig
-    @inquiry.artist     = current_profile
-    @inquiry.user       = current_profile.main_user
-    @inquiry.promoter   = @gig.promoter
-    existing_gig_invite = current_profile.gig_invites.where(gig_id: params[:gig_id]).first
-
-    #if inquiry is valid, which means we will definitivly after this, copy
-    #the riders from the current profile to the inquiry
-    if @inquiry.valid?
-      if current_profile.technical_rider.present? && current_profile.technical_rider.item_hash == params[:inquiry][:technical_rider_hash]
-        @inquiry.build_technical_rider(user_id: current_user.id).save!
-        MediaItemWorker.perform_async(current_profile.technical_rider.id, @inquiry.technical_rider.id)
-      end
-
-      if current_profile.catering_rider.present? && current_profile.catering_rider.item_hash == params[:inquiry][:catering_rider_hash]
-        @inquiry.build_catering_rider(user_id: current_user.id).save!
-        MediaItemWorker.perform_async(current_profile.catering_rider.id, @inquiry.catering_rider.id)
-      end
-    end
-
-    if @inquiry.save
-      #if profile has no rides yet, which means, this is the profiles first inquiry ever
-      #copy the riders from the inquiry to the profile
-      if current_profile.technical_rider.blank? && @inquiry.technical_rider.present?
-        current_profile.build_technical_rider(user_id: current_user.id).save!
-        MediaItemWorker.perform_async(@inquiry.technical_rider.id, current_profile.technical_rider.id)
-      end
-
-      if current_profile.catering_rider.blank? && @inquiry.catering_rider.present?
-        current_profile.build_catering_rider(user_id: current_user.id).save!
-        MediaItemWorker.perform_async(@inquiry.catering_rider.id, current_profile.catering_rider.id)
-      end
+    if @inquiry.save_with_gig_and_profile(gig, current_profile)
+      sync_riders(@inquiry, current_profile)
 
       Event::WatchlistArtistInquiry.emit(@inquiry.id)
+      Gigmit::Intercom::Event::Simple.emit('gig-received-application', gig.promoter_id)
+      IntercomCreateOrUpdateUserWorker.perform_async(gig.promoter_id)
 
-      Gigmit::Intercom::Event::Simple.emit('gig-received-application', @gig.promoter_id)
-      IntercomCreateOrUpdateUserWorker.perform_async(@gig.promoter_id)
-
+      existing_gig_invite = current_profile.gig_invites.find_by(gig_id: params[:gig_id])
       if existing_gig_invite.present?
         Event::Read.emit(:gig_invite, existing_gig_invite.id)
       end
+
       render json: @inquiry, status: :created
     else
       render json: @inquiry.errors, status: :unprocessable_entity
     end
   end
 
-  #only promoter use this
+  # only promoters use this
   def show
-    #this redirect is for unfixed legacy links, because artist see inquiries
-    #not prefixed with gig in the url
+    # this redirect is for unfixed legacy links, because artist see inquiries
+    # not prefixed with gig in the url
     redirect_to inquiry_path(@inquiry.id) and return if current_profile.artist?
 
     Event::Read.emit(:inquiry, @inquiry.id)
@@ -111,14 +56,39 @@ class Gigs::InquiriesController < Gigs::ApplicationController
 
   private
 
-  def load_gig
-    @gig = Gig.where(slug: params[:gig_id]).first
+  def gig
+    @gig ||= Gig.find_by! slug: params[:gig_id]
   end
+  helper_method :gig
 
   def paywall_chroot
     if current_profile.artist? && flash[:bypass_trial_chroot] != true
       # subscribe to premium-trial first to be able to use the platform at all
       redirect_to '/ab/gigmit-pro-free-trial' and return
+    end
+  end
+
+  def sync_riders(inquiry, profile)
+    ['catering', 'technical'].each do |type|
+      if current_profile.send("#{type}_rider").present?
+        if current_profile.send("#{type}_rider").item_hash == params[:inquiry]["#{type}_rider_hash".to_sym]
+
+          @inquiry.send("build_#{type}_rider", {user_id: current_user.id}).save!
+
+          MediaItemWorker.perform_async(
+            current_profile.send("#{type}_rider").id,
+            @inquiry.send("#{type}_rider").id
+          )
+        end
+      elsif @inquiry.send("#{type}_rider").present?
+        
+        current_profile.send("build_#{type}_rider", {user_id: current_user.id}).save!
+
+        MediaItemWorker.perform_async(
+          @inquiry.send("#{type}_rider").id, 
+          current_profile.send("#{type}_rider").id
+        )
+      end
     end
   end
 end
