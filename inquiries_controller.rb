@@ -28,27 +28,7 @@ class Gigs::InquiriesController < Gigs::ApplicationController
 
   def create
     if @inquiry.save_with_gig_and_profile(gig, current_profile)
-      if current_profile.technical_rider.present?
-        if current_profile.technical_rider.item_hash == params[:inquiry][:technical_rider_hash]
-          @inquiry.build_technical_rider(user_id: current_user.id).save!
-          MediaItemWorker.perform_async(current_profile.technical_rider.id, @inquiry.technical_rider.id)
-        end
-      elsif @inquiry.technical_rider.present?
-        # if profile has no riders yet, which means this is the profile's first inquiry ever
-        # copy the riders from the inquiry to the profile
-        current_profile.build_technical_rider(user_id: current_user.id).save!
-        MediaItemWorker.perform_async(@inquiry.technical_rider.id, current_profile.technical_rider.id)
-      end
-
-      if current_profile.catering_rider.present?
-        if current_profile.catering_rider.item_hash == params[:inquiry][:catering_rider_hash]
-          @inquiry.build_catering_rider(user_id: current_user.id).save!
-          MediaItemWorker.perform_async(current_profile.catering_rider.id, @inquiry.catering_rider.id)
-        end
-      elsif @inquiry.catering_rider.present?
-        current_profile.build_catering_rider(user_id: current_user.id).save!
-        MediaItemWorker.perform_async(@inquiry.catering_rider.id, current_profile.catering_rider.id)
-      end
+      sync_riders(@inquiry, current_profile)
 
       Event::WatchlistArtistInquiry.emit(@inquiry.id)
       Gigmit::Intercom::Event::Simple.emit('gig-received-application', gig.promoter_id)
@@ -85,6 +65,30 @@ class Gigs::InquiriesController < Gigs::ApplicationController
     if current_profile.artist? && flash[:bypass_trial_chroot] != true
       # subscribe to premium-trial first to be able to use the platform at all
       redirect_to '/ab/gigmit-pro-free-trial' and return
+    end
+  end
+
+  def sync_riders(inquiry, profile)
+    ['catering', 'technical'].each do |type|
+      if current_profile.send("#{type}_rider").present?
+        if current_profile.send("#{type}_rider").item_hash == params[:inquiry]["#{type}_rider_hash".to_sym]
+
+          @inquiry.send("build_#{type}_rider", {user_id: current_user.id}).save!
+
+          MediaItemWorker.perform_async(
+            current_profile.send("#{type}_rider").id,
+            @inquiry.send("#{type}_rider").id
+          )
+        end
+      elsif @inquiry.send("#{type}_rider").present?
+        
+        current_profile.send("build_#{type}_rider", {user_id: current_user.id}).save!
+
+        MediaItemWorker.perform_async(
+          @inquiry.send("#{type}_rider").id, 
+          current_profile.send("#{type}_rider").id
+        )
+      end
     end
   end
 end
